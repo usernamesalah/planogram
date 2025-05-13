@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "planogramv2"
+version = "0.1.0"
+description = "Planogram detection application using FastAPI, Streamlit, YOLO, and CLIP."
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.9.7 || >3.9.7,<4.0"
+fastapi = "^0.104.1"
+uvicorn = {extras = ["standard"], version = "^0.24.0.post1"}
+streamlit = "^1.33.0"
+torch = "^2.1.0"
+torchvision = "^0.16.0"
+torchaudio = "^2.1.0"
+opencv-python = "^4.8.1.78"
+Pillow = "^10.1.0"
+openai-clip = "^1.0.1" # Corrected package name and version to latest available
+ultralytics = "^8.0.200" # For YOLOv8
+supabase = "^1.0.3"
+pgvector = "^0.2.0" # Check for the correct pgvector client library if this is not it
+python-dotenv = "^1.0.0"
+arq = "^0.25.0" # Optional, for background tasks
+setuptools = "*" # Adding setuptools with a flexible version constraint
+numpy = "<2.0" # Pinning numpy to 1.x to avoid compatibility issues
+python-multipart = "^0.0.9" # For FastAPI form data/file uploads
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api" 
+
+[tool.poetry.scripts]
+start = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
