@@ -94,7 +94,7 @@ def draw_boxes_on_image(image_bytes: bytes, annotations_to_draw: List[Dict[str, 
             if confidence is not None and isinstance(confidence, float):
                 text = f"{label} ({confidence:.2f})"
             
-            draw.rectangle(box, outline=color, width=2)
+            draw.rectangle(box, outline=color, width=5)
             text_position = (box[0] + 2, box[1] + 2)
             try:
                 # For simplicity, using default font. Consider ImageFont.truetype for better control.

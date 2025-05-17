@@ -193,13 +193,13 @@ def _draw_planogram_annotations(
         elif status == 'misplaced':
             color = "orange"
         
-        draw.rectangle(box, outline=color, width=2)
+        draw.rectangle(box, outline=color, width=5)
         draw.text((box[0], box[1] - 15 if box[1] - 15 > 0 else box[1] + 2), f"{name[:20]} (ID'd)", fill=color, font=font)
 
         # If misplaced, also draw its expected box
         if status == 'misplaced' and 'expected_box' in item:
             exp_b = item['expected_box']
-            draw.rectangle(exp_b, outline="blue", width=1, dash=[5,5])
+            draw.rectangle(exp_b, outline="blue", width=3, dash=[5,5])
             draw.text((exp_b[0], exp_b[1] - 15 if exp_b[1] - 15 > 0 else exp_b[1] + 2), f"Exp: {name[:15]}", fill="blue", font=font)
 
 
@@ -207,7 +207,7 @@ def _draw_planogram_annotations(
     for item in missing_products:
         box = item["expected_box"]
         name = item.get("name", f"ID:{item['product_id']}")
-        draw.rectangle(box, outline="red", width=2, dash=[5,5])
+        draw.rectangle(box, outline="red", width=5, dash=[5,5])
         draw.text((box[0], box[1] - 15 if box[1] - 15 > 0 else box[1] + 2), f"MISSING: {name[:15]}", fill="red", font=font)
 
     buffered = io.BytesIO()
