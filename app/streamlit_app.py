@@ -3,6 +3,8 @@ import requests
 import base64
 import os
 from dotenv import load_dotenv
+import io
+from PIL import Image
 
 load_dotenv()
 
@@ -24,7 +26,33 @@ app_mode = st.sidebar.selectbox("Choose the app mode",
 # --- Product Detection Page ---
 if app_mode == "Product Detection":
     st.header("Product Detection")
+    
+    # Add tabs for different detection modes
+    detection_mode = st.radio("Detection Mode", ["Standard", "Enhanced (with metadata filtering)"])
+    
     uploaded_image = st.file_uploader("Upload an image for product detection", type=["jpg", "jpeg", "png"])
+    
+    # Add metadata filtering options for enhanced detection
+    metadata_filters = {}
+    if detection_mode == "Enhanced (with metadata filtering)":
+        st.subheader("Metadata Filters (Optional)")
+        col1, col2 = st.columns(2)
+        with col1:
+            category = st.text_input("Category")
+            brand = st.text_input("Brand")
+            color = st.text_input("Color")
+        with col2:
+            barcode = st.text_input("Barcode")
+            name_filter = st.text_input("Product Name")
+            variant_filter = st.text_input("Variant")
+        
+        # Only add non-empty filters
+        if category: metadata_filters["category"] = category
+        if brand: metadata_filters["brand"] = brand
+        if color: metadata_filters["color"] = color
+        if barcode: metadata_filters["barcode"] = barcode
+        if name_filter: metadata_filters["name"] = name_filter
+        if variant_filter: metadata_filters["variant"] = variant_filter
 
     if uploaded_image:
         st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
@@ -32,17 +60,37 @@ if app_mode == "Product Detection":
             with st.spinner("Detecting products..."):
                 b64_image = image_to_base64(uploaded_image)
                 try:
-                    response = requests.post(f"{API_URL}/detect/", json={"image": b64_image})
-                    response.raise_for_status() # Raise an exception for HTTP errors
+                    # Use the appropriate endpoint based on detection mode
+                    if detection_mode == "Standard":
+                        response = requests.post(f"{API_URL}/detect/", json={"image": b64_image})
+                    else:
+                        response = requests.post(f"{API_URL}/detect/detailed/", 
+                                               json={"image": b64_image, "filter_by_metadata": metadata_filters})
+                    
+                    response.raise_for_status()
                     detection_data = response.json()
                     st.success("Detection successful!")
+                    
                     if detection_data.get("annotated_image"):
                         annotated_img_bytes = base64.b64decode(detection_data["annotated_image"])
                         st.image(annotated_img_bytes, caption="Detected Products", use_column_width=True)
+                    
                     st.subheader("Detected Products:")
                     if detection_data.get("products"):
                         for prod in detection_data["products"]:
+                            # Display more metadata if available
+                            metadata_str = ""
+                            if prod.get("category"): metadata_str += f"Category: {prod['category']}, "
+                            if prod.get("brand"): metadata_str += f"Brand: {prod['brand']}, "
+                            if prod.get("color"): metadata_str += f"Color: {prod['color']}"
+                            
                             st.write(f"- {prod.get('name')} (Variant: {prod.get('variant', 'N/A')})")
+                            if metadata_str:
+                                st.write(f"  {metadata_str}")
+                            
+                            # Show augmentation count if available
+                            if prod.get("augmented_embeddings_count", 0) > 0:
+                                st.write(f"  Augmentations: {prod.get('augmented_embeddings_count')}")
                     else:
                         st.write("No products detected or no product list in response.")
                 except requests.exceptions.RequestException as e:
@@ -59,10 +107,32 @@ elif app_mode == "Product Management":
     with st.form("new_product_form", clear_on_submit=True):
         product_name = st.text_input("Product Name")
         product_variant = st.text_input("Product Variant (Optional)")
-        # We will now prioritize file upload. The image_url field can remain for cases where an external URL is preferred
-        # and the backend task is adapted to fetch from URL (currently it expects bytes).
+        
+        # Add metadata fields
+        st.subheader("Product Metadata")
+        col1, col2 = st.columns(2)
+        with col1:
+            category = st.text_input("Category")
+            brand = st.text_input("Brand")
+            color = st.text_input("Color")
+        with col2:
+            barcode = st.text_input("Barcode")
+            tags = st.text_input("Tags (comma-separated)")
+        
+        # Image options
         product_image_url_input = st.text_input("Product Image URL (Optional - if not uploading file)")
-        uploaded_product_image_file = st.file_uploader("Upload Product Image (Recommended)", type=["jpg", "jpeg", "png"])
+        st.text("Upload Product Images (Recommended - can select multiple)")
+        uploaded_product_images = st.file_uploader("Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+        
+        st.info("""**Enhanced Image Processing:**
+        1. Each uploaded image will be processed in two ways:
+           - Original image: Full product with packaging and background
+           - Color-enhanced: Specialized saturation enhancement for colorful packaging
+        2. Both versions will be used to create embeddings
+        3. Multiple augmentations focusing on color variations will be generated
+        4. This specifically improves detection of bright, colorful products like Kuaci Rebo snacks""")
+        
+        generate_augmentations = st.checkbox("Generate image augmentations", value=True)
         
         submitted = st.form_submit_button("Add Product")
 
@@ -72,26 +142,49 @@ elif app_mode == "Product Management":
                 form_data = {
                     "name": (None, product_name),
                     "variant": (None, product_variant if product_variant else ""),
-                    "image_url": (None, product_image_url_input if product_image_url_input else "")
+                    "image_url": (None, product_image_url_input if product_image_url_input else ""),
+                    "category": (None, category if category else ""),
+                    "brand": (None, brand if brand else ""),
+                    "color": (None, color if color else ""),
+                    "barcode": (None, barcode if barcode else ""),
+                    "tags": (None, tags if tags else "")
                 }
+                
                 files_data = {}
-                if uploaded_product_image_file:
-                    # Add file to the files dictionary for multipart/form-data
-                    files_data["image_upload"] = (uploaded_product_image_file.name, uploaded_product_image_file.getvalue(), uploaded_product_image_file.type)
                 
                 try:
-                    # When sending files, requests typically doesn't use the `json` parameter.
-                    # It uses `files` for file parts and `data` for other form fields.
-                    if files_data: # If there's a file to upload
+                    # First, create the product
+                    if uploaded_product_images and len(uploaded_product_images) > 0:
+                        # Add the first image during product creation
+                        first_image = uploaded_product_images[0]
+                        files_data["image_upload"] = (first_image.name, first_image.getvalue(), first_image.type)
                         response = requests.post(f"{API_URL}/products/", data=form_data, files=files_data)
-                    else: # If no file, just form data (e.g., only image_url provided)
-                        # The API's /products/ endpoint expects Form data, not JSON when no file is sent.
-                        # So, we should convert form_data to simple dict for the `data` param if no files.
-                        simple_data_payload = {k: v[1] for k, v in form_data.items()}                        
+                    else:
+                        # No files, just form data
+                        simple_data_payload = {k: v[1] for k, v in form_data.items()}
                         response = requests.post(f"{API_URL}/products/", data=simple_data_payload)
-                        
+                    
                     response.raise_for_status()
-                    st.success(f"Product '{product_name}' added successfully! Processing image in background if provided.")
+                    product_data = response.json()
+                    product_id = product_data.get("id")
+                    
+                    # If there are additional images, upload them
+                    if uploaded_product_images and len(uploaded_product_images) > 1:
+                        additional_images = uploaded_product_images[1:]
+                        multi_files = []
+                        
+                        for img in additional_images:
+                            multi_files.append(('images', (img.name, img.getvalue(), img.type)))
+                        
+                        multi_response = requests.post(
+                            f"{API_URL}/products/upload-images/",
+                            data={"product_id": product_id},
+                            files=multi_files
+                        )
+                        multi_response.raise_for_status()
+                        
+                    st.success(f"Product '{product_name}' added successfully with {len(uploaded_product_images)} images!")
+                    
                 except requests.exceptions.HTTPError as http_err:
                     st.error(f"Error adding product: {http_err} - {http_err.response.text}")
                 except requests.exceptions.RequestException as e:
@@ -108,9 +201,30 @@ elif app_mode == "Product Management":
             response = requests.get(f"{API_URL}/products/")
             response.raise_for_status()
             products = response.json()
+            
             if products:
                 for prod in products:
-                    st.write(f"- {prod.get('name')} (Variant: {prod.get('variant', 'N/A')}, ID: {prod.get('id')})")
+                    # Create expandable section for each product
+                    with st.expander(f"{prod.get('name')} (ID: {prod.get('id')})"):
+                        # Basic info
+                        st.write(f"**Variant:** {prod.get('variant', 'N/A')}")
+                        
+                        # Metadata
+                        metadata_col1, metadata_col2 = st.columns(2)
+                        with metadata_col1:
+                            st.write(f"**Category:** {prod.get('category', 'N/A')}")
+                            st.write(f"**Brand:** {prod.get('brand', 'N/A')}")
+                            st.write(f"**Color:** {prod.get('color', 'N/A')}")
+                        with metadata_col2:
+                            st.write(f"**Barcode:** {prod.get('barcode', 'N/A')}")
+                            st.write(f"**Tags:** {', '.join(prod.get('tags', []))}")
+                        
+                        # Augmentation info
+                        st.write(f"**Augmentations:** {prod.get('augmented_embeddings_count', 0)}")
+                        
+                        # Image if available
+                        if prod.get('image_url'):
+                            st.image(prod.get('image_url'), width=200)
             else:
                 st.write("No products found.")
         except requests.exceptions.RequestException as e:
@@ -123,6 +237,25 @@ elif app_mode == "Planogram Analysis":
     st.header("Planogram Compliance Analysis")
     actual_planogram_image = st.file_uploader("Upload actual planogram image", type=["jpg", "jpeg", "png"])
     
+    # Add metadata filtering for planogram analysis
+    st.subheader("Metadata Filters (Optional)")
+    st.write("These filters help narrow down the product search during analysis")
+    
+    metadata_col1, metadata_col2 = st.columns(2)
+    with metadata_col1:
+        category_filter = st.text_input("Category Filter")
+        brand_filter = st.text_input("Brand Filter")
+    with metadata_col2:
+        color_filter = st.text_input("Color Filter")
+        name_filter = st.text_input("Name Filter")
+    
+    # Prepare metadata filters
+    metadata_filters = {}
+    if category_filter: metadata_filters["category"] = category_filter
+    if brand_filter: metadata_filters["brand"] = brand_filter
+    if color_filter: metadata_filters["color"] = color_filter
+    if name_filter: metadata_filters["name"] = name_filter
+    
     st.subheader("Define Expected Planogram Layout")
 
     # Fetch products for dropdown selection
@@ -132,8 +265,6 @@ elif app_mode == "Planogram Analysis":
         response.raise_for_status()
         fetched_prods_data = response.json()
         if fetched_prods_data:
-            # Create a list of tuples or objects suitable for st.selectbox options
-            # [{'id': 1, 'name': 'Coke', ...}, ...]
             available_products = fetched_prods_data
     except Exception as e:
         st.error(f"Error fetching product list: {e}. Please ensure API is running and products exist.")
@@ -180,18 +311,15 @@ elif app_mode == "Planogram Analysis":
 
         if add_item_submitted and selected_product_id and x2 > x1 and y2 > y1:
             # Find the original product name from available_products using selected_product_id
-            # This is a bit redundant if we store selected_product_name already, but safer.
             product_details = next((p for p in available_products if p['id'] == selected_product_id), None)
             display_name_for_item = product_details['name'] if product_details else "Unknown Product"
 
             st.session_state.expected_layout_items.append({
                 "product_id": selected_product_id,
-                "name": display_name_for_item, # Store name for display and potential API use
+                "name": display_name_for_item,
                 "expected_box": [int(x1), int(y1), int(x2), int(y2)]
             })
             st.success(f"Added {display_name_for_item} to expected layout.")
-            # Fields will clear due to form submission if not for session state trickiness
-            # Forcing a rerun to update the displayed list above the form
             st.rerun()
         elif add_item_submitted:
             st.error("Please select a product and ensure X2 > X1 and Y2 > Y1 for the box.")
@@ -205,13 +333,14 @@ elif app_mode == "Planogram Analysis":
         if st.button("Analyze Planogram Compliance"):
             with st.spinner("Analyzing planogram..."):
                 b64_actual_image = image_to_base64(actual_planogram_image)
-                # Prepare the layout for the API (it already expects product_id and expected_box)
                 api_expected_layout = st.session_state.expected_layout_items
                 
                 request_data = {
                     "actual_image": b64_actual_image,
-                    "expected_layout": api_expected_layout
+                    "expected_layout": api_expected_layout,
+                    "metadata_filters": metadata_filters if metadata_filters else None
                 }
+                
                 try:
                     response = requests.post(f"{API_URL}/planogram/compare/", json=request_data)
                     response.raise_for_status()
@@ -223,20 +352,39 @@ elif app_mode == "Planogram Analysis":
                     if analysis_data.get("annotated_image"):
                         annotated_img_bytes = base64.b64decode(analysis_data["annotated_image"])
                         st.image(annotated_img_bytes, caption="Analysis Result", use_column_width=True)
-
-                    st.subheader("Misplaced Products:")
-                    if analysis_data.get("misplaced_products"):
-                        for p in analysis_data["misplaced_products"]:
-                            st.write(f"- {p.get('name')}: Expected at {p.get('expected_location')}, Found at {p.get('actual_location')}")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Misplaced Products:")
+                        if analysis_data.get("misplaced_products"):
+                            for p in analysis_data["misplaced_products"]:
+                                st.markdown(f"- 🟠 **{p.get('name')}**")
+                                st.markdown(f"  - Expected: {p.get('expected_box')}")
+                                st.markdown(f"  - Actual: {p.get('actual_box')}")
+                                st.markdown(f"  - IoU: {p.get('iou', 0):.2f}")
+                        else:
+                            st.write("No misplaced products.")
+                    
+                    with col2:
+                        st.subheader("Missing Products:")
+                        if analysis_data.get("missing_products"):
+                            for p in analysis_data["missing_products"]:
+                                st.markdown(f"- 🔴 **{p.get('name')}**")
+                                st.markdown(f"  - Expected position: {p.get('expected_box')}")
+                                st.markdown(f"  - Reason: {p.get('reason', 'Unknown')}")
+                        else:
+                            st.write("No missing products.")
+                    
+                    # Add section for extra products (new feature)
+                    st.subheader("Extra Products:")
+                    if analysis_data.get("extra_products"):
+                        for p in analysis_data["extra_products"]:
+                            st.markdown(f"- 🟣 **{p.get('name')}**")
+                            st.markdown(f"  - Position: {p.get('actual_box')}")
+                            st.markdown(f"  - Reason: {p.get('reason', 'Unknown')}")
                     else:
-                        st.write("No misplaced products.")
-
-                    st.subheader("Missing Products:")
-                    if analysis_data.get("missing_products"):
-                        for p in analysis_data["missing_products"]:
-                            st.write(f"- {p.get('name')}: Expected at {p.get('expected_location')}")
-                    else:
-                        st.write("No missing products.")
+                        st.write("No extra products found.")
                         
                 except requests.exceptions.RequestException as e:
                     st.error(f"Error calling planogram API: {e} - {response.text if 'response' in locals() else 'No response'}")
@@ -246,5 +394,5 @@ elif app_mode == "Planogram Analysis":
 st.sidebar.markdown("----")
 st.sidebar.info(
     "This is a demo application for Planogram Detection. "
-    "Not all features are fully implemented."
+    "Enhanced with data augmentation, metadata filtering, and OCR."
 ) 

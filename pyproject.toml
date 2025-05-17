@@ -25,6 +25,7 @@ arq = "^0.25.0" # Optional, for background tasks
 setuptools = "*" # Adding setuptools with a flexible version constraint
 numpy = "<2.0" # Pinning numpy to 1.x to avoid compatibility issues
 python-multipart = "^0.0.9" # For FastAPI form data/file uploads
+pytesseract = "^0.3.13"
 
 [build-system]
 requires = ["poetry-core"]

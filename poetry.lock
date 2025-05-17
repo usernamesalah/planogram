@@ -2322,6 +2322,22 @@ files = [
 diagrams = ["jinja2", "railroad-diagrams"]
 
 [[package]]
+name = "pytesseract"
+version = "0.3.13"
+description = "Python-tesseract is a python wrapper for Google's Tesseract-OCR"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "pytesseract-0.3.13-py3-none-any.whl", hash = "sha256:7a99c6c2ac598360693d83a416e36e0b33a67638bb9d77fdcac094a3589d4b34"},
+    {file = "pytesseract-0.3.13.tar.gz", hash = "sha256:4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9"},
+]
+
+[package.dependencies]
+packaging = ">=21.3"
+Pillow = ">=8.0.0"
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 description = "Extensions to the standard Python datetime module"
@@ -3737,4 +3753,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9,<3.9.7 || >3.9.7,<4.0"
-content-hash = "a518c0e8ffdb7d3be5b174ce7f3cb900ffa105ced4f0972def8a2bb240d2f15f"
+content-hash = "82a47c7ea199337a7e14f426cf950779ef4318ebc9e52aea7aec4057ad49121d"

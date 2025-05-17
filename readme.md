@@ -91,3 +91,76 @@ The planogram analysis feature compares detected products with an expected layou
 
 Products can be detected with their specific variants using three methods:
 - **Embedding-based**: Uses CLIP to compare images with variant descriptions
+
+## Planogram Image Matching Improvements
+
+The planogram image matching system has been enhanced with the following features:
+
+### 1. Data Augmentation Pipeline
+- Automatically generates multiple variations of product images (rotation, scaling, brightness/contrast adjustments)
+- Creates embeddings for each variation to improve robustness in matching
+- Supports configurable number of augmentations per image
+
+### 2. Enhanced Metadata and Database Schema
+- Added support for rich product metadata (category, brand, color, dimensions, etc.)
+- Created separate table for storing augmented embeddings
+- Updated database functions for efficient filtering and search
+
+### 3. Hybrid Re-ranking System
+- Vector similarity search combined with metadata filtering
+- OCR text extraction for text-based matching
+- Spatial context awareness for better placement analysis
+- Weighted combination of multiple signals for more accurate matching
+
+### 4. Multiple Image Upload Support
+- API endpoints for uploading multiple product images
+- Background processing for efficient embedding generation
+- Optimized augmentation strategy for multiple images
+
+### 5. Improved Visualization
+- Enhanced annotations with OCR text display
+- Color-coded status indicators (correct, misplaced, missing, extra)
+- Better error handling and detailed logging
+
+## Usage Examples
+
+### Uploading a Product with Metadata
+```bash
+curl -X POST "http://localhost:8000/products/" \
+  -H "Content-Type: multipart/form-data" \
+  -F "name=Product Name" \
+  -F "variant=Regular" \
+  -F "category=Beverages" \
+  -F "brand=SampleBrand" \
+  -F "color=Red" \
+  -F "barcode=1234567890" \
+  -F "tags=drink,soda,cola" \
+  -F "image_upload=@/path/to/product_image.jpg"
+```
+
+### Uploading Multiple Images for a Product
+```bash
+curl -X POST "http://localhost:8000/products/upload-images/" \
+  -H "Content-Type: multipart/form-data" \
+  -F "product_id=1" \
+  -F "images=@/path/to/image1.jpg" \
+  -F "images=@/path/to/image2.jpg" \
+  -F "images=@/path/to/image3.jpg"
+```
+
+### Comparing a Planogram with Metadata Filtering
+```bash
+curl -X POST "http://localhost:8000/planogram/compare/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actual_image": "base64_encoded_image",
+    "expected_layout": [
+      {"product_id": 1, "name": "Product 1", "expected_box": [10, 10, 100, 100]},
+      {"product_id": 2, "name": "Product 2", "expected_box": [120, 10, 220, 100]}
+    ],
+    "metadata_filters": {
+      "category": "Beverages",
+      "brand": "SampleBrand"
+    }
+  }'
+```

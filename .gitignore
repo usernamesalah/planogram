@@ -4,3 +4,7 @@
 .env.test.local
 .env.production.local
 
+product_embedding_inputs/
+annotated_outputs/
+
+.cursor/
