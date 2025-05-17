@@ -21,18 +21,17 @@ if SAVE_PRODUCT_EMBEDDING_IMAGES:
     LOCAL_SAVE_PATH_PRODUCT_EMBEDDINGS.mkdir(parents=True, exist_ok=True)
     print(f"Worker: Will save product images used for embeddings to {LOCAL_SAVE_PATH_PRODUCT_EMBEDDINGS.resolve()}")
 
-async def embed_and_update_product_task(product_id: int, image_bytes: Optional[bytes], generate_augmentations: bool = True, num_augmentations: int = 10, skip_yolo_crop: bool = True):
+async def embed_and_update_product_task(product_id: int, image_bytes: Optional[bytes], generate_augmentations: bool = True, num_augmentations: int = 10, crop_method: str = "smart"):
     """
     Background task to generate embedding for a product image and update the database.
-    Process the image with color enhancement for better detection of colorful packaging.
-    Generates augmented versions of the image and stores their embeddings if requested.
+    Process the image with color enhancement and smart cropping for better detection.
     
     Args:
         product_id: The product ID to update
         image_bytes: The image bytes to process
         generate_augmentations: Whether to generate augmented versions of the image
         num_augmentations: Number of augmented versions to generate
-        skip_yolo_crop: Whether to skip YOLO cropping (defaults to True)
+        crop_method: Cropping method to use ('smart', 'color', 'none')
     """
     if not image_bytes:
         print(f"Task: No image bytes provided for product ID: {product_id}. Skipping embedding.")
@@ -99,64 +98,69 @@ async def embed_and_update_product_task(product_id: int, image_bytes: Optional[b
         except Exception as e_enhance:
             print(f"Task: Error creating color-enhanced version for product ID {product_id}: {e_enhance}")
         
+        # 3. Process smart-cropped version if requested
+        if crop_method != "none":
+            try:
+                # Use appropriate cropping method
+                if crop_method == "color":
+                    # Use color-based cropping (good for colorful packaging like Kuaci Rebo)
+                    cropped_image, crop_box = await asyncio.to_thread(
+                        detection_service.color_based_crop, 
+                        pil_image
+                    )
+                    crop_method_name = "color_based"
+                else:
+                    # Default to smart cropping
+                    cropped_image, crop_box = await asyncio.to_thread(
+                        detection_service.smart_crop, 
+                        pil_image
+                    )
+                    crop_method_name = "smart"
+                
+                # Save cropped image if enabled
+                if SAVE_PRODUCT_EMBEDDING_IMAGES:
+                    try:
+                        save_filename = LOCAL_SAVE_PATH_PRODUCT_EMBEDDINGS / f"product_{product_id}_{crop_method_name}_crop_clip_input.jpg"
+                        await asyncio.to_thread(cropped_image.save, save_filename, "JPEG")
+                        print(f"Task: Saved {crop_method_name}-cropped image for product ID {product_id} to {save_filename}")
+                    except Exception as e_save:
+                        print(f"Task: Error saving cropped image for product ID {product_id}: {e_save}")
+                
+                # Generate CLIP embedding for cropped image
+                cropped_embedding = await asyncio.to_thread(embedding_service.get_image_embedding, cropped_image)
+                if cropped_embedding:
+                    # Add the cropped image embedding as a special augmentation type
+                    await supabase_service.add_augmented_embedding(
+                        product_id=product_id,
+                        embedding=cropped_embedding,
+                        augmentation_type=f"{crop_method_name}_cropped"
+                    )
+                    print(f"Task: Added {crop_method_name}-cropped embedding for product ID: {product_id}")
+                    
+                    # Generate augmentations from cropped image too
+                    if generate_augmentations:
+                        await process_augmentations(
+                            product_id=product_id,
+                            image=cropped_image,
+                            num_augmentations=num_augmentations // 2,
+                            prefix=f"{crop_method_name}_cropped"
+                        )
+                else:
+                    print(f"Task: Failed to generate CLIP embedding for cropped image, product ID: {product_id}")
+            except Exception as e_crop:
+                print(f"Task: Error during {crop_method} cropping for product ID {product_id}: {e_crop}")
+        else:
+            print(f"Task: Cropping skipped for product ID: {product_id}.")
+            
         # Generate augmentations from original image
         if generate_augmentations:
             await process_augmentations(
                 product_id=product_id,
                 image=original_image,
-                num_augmentations=num_augmentations,
+                num_augmentations=num_augmentations if crop_method == "none" else num_augmentations // 2,
                 prefix="original"
             )
         
-        # 3. Process YOLO-cropped image if not skipped (disabled by default)
-        if not skip_yolo_crop:
-            try:
-                detections = await asyncio.to_thread(detection_service.detect_objects, image_bytes)
-                if detections:
-                    print(f"Task: Detected {len(detections)} objects for product ID: {product_id}")
-                    # Select the largest detected object by area
-                    largest_detection = max(detections, key=lambda d: (d['box'][2] - d['box'][0]) * (d['box'][3] - d['box'][1]))
-                    best_box = largest_detection['box']
-                    
-                    cropped_image = await asyncio.to_thread(detection_service.crop_object, pil_image, best_box)
-                    
-                    # Save cropped image if enabled
-                    if SAVE_PRODUCT_EMBEDDING_IMAGES:
-                        try:
-                            save_filename = LOCAL_SAVE_PATH_PRODUCT_EMBEDDINGS / f"product_{product_id}_yolo_cropped_clip_input.jpg"
-                            await asyncio.to_thread(cropped_image.save, save_filename, "JPEG")
-                            print(f"Task: Saved YOLO-cropped image for product ID {product_id} to {save_filename}")
-                        except Exception as e_save:
-                            print(f"Task: Error saving YOLO-cropped image for product ID {product_id}: {e_save}")
-                    
-                    # Generate CLIP embedding for cropped image and add as augmentation
-                    cropped_embedding = await asyncio.to_thread(embedding_service.get_image_embedding, cropped_image)
-                    if cropped_embedding:
-                        # Add the cropped image embedding as a special augmentation type
-                        await supabase_service.add_augmented_embedding(
-                            product_id=product_id,
-                            embedding=cropped_embedding,
-                            augmentation_type="yolo_cropped"
-                        )
-                        print(f"Task: Added YOLO-cropped embedding for product ID: {product_id}")
-                        
-                        # Generate augmentations from cropped image too
-                        if generate_augmentations:
-                            await process_augmentations(
-                                product_id=product_id,
-                                image=cropped_image,
-                                num_augmentations=num_augmentations // 2,  # Split augmentations between original and cropped
-                                prefix="yolo_cropped"
-                            )
-                    else:
-                        print(f"Task: Failed to generate CLIP embedding for YOLO-cropped image, product ID: {product_id}")
-                else:
-                    print(f"Task: No objects detected by YOLO for product ID: {product_id}. Using original image only.")
-            except Exception as e_crop:
-                print(f"Task: Error during YOLO detection/cropping for product ID {product_id}: {e_crop}")
-        else:
-            print(f"Task: YOLO cropping skipped for product ID: {product_id}.")
-            
         # Update the total augmentation count on the product
         augmented_embeddings_count = await supabase_service.get_augmented_embeddings_count(product_id)
         await supabase_service.update_product_augmentation_count(product_id, augmented_embeddings_count)
@@ -238,7 +242,7 @@ async def process_multiple_product_images(product_id: int, image_bytes_list: Lis
                 image_bytes=img_bytes,
                 generate_augmentations=generate_augmentations,
                 num_augmentations=num_augmentations,
-                skip_yolo_crop=False  # Always process both original and YOLO-cropped
+                crop_method="smart"  # Always process both original and smart-cropped
             )
             print(f"Task: Completed processing image {i+1}/{len(image_bytes_list)} for product ID: {product_id}")
         except Exception as e:

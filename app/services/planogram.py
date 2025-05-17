@@ -264,9 +264,8 @@ async def compare_planogram_layouts(
             # Crop the detected object
             cropped_pil_image = detection_service.crop_object(actual_pil_image, actual_box)
             
-            # Extract text using OCR if available
-            ocr_results = extract_text_from_image(cropped_pil_image)
-            ocr_text = " ".join([result.text for result in ocr_results]) if ocr_results else None
+            # OCR functionality disabled
+            ocr_text = None
             
             # Generate embedding
             img_embedding = embedding_service.get_image_embedding(cropped_pil_image)
@@ -422,44 +421,109 @@ def _draw_planogram_annotations(
 ) -> bytes:
     draw = ImageDraw.Draw(image)
     try:
-        font = ImageFont.truetype("arial.ttf", 15)
+        font = ImageFont.truetype("arial.ttf", 16)
     except IOError:
         font = ImageFont.load_default()
 
+    # Product ID to color mapping for consistency
+    product_colors = {
+        "correct": "green",
+        "misplaced": "orange",
+        "extra": "purple",
+        "missing": "red"
+    }
+    
     # Draw identified products
     for item in identified_products:
         box = item["actual_box"]
         name = item.get("name", f"ID:{item['product_id']}")
         status = item.get('status') # 'correct', 'misplaced', 'extra'
         
-        color = "yellow" # Default for identified but not matched to an expectation
-        if status == 'correct':
-            color = "green"
-        elif status == 'misplaced':
-            color = "orange"
-        elif status == 'extra':
-            color = "purple"
+        color = product_colors.get(status, "yellow")
         
+        # Draw bounding box with thicker border
         draw.rectangle(box, outline=color, width=5)
-        # Show OCR text if available
+        
+        # Draw eye-catching text with background
         display_text = name[:20]
         if 'ocr_text' in item and item['ocr_text']:
             display_text += f" OCR:{item['ocr_text'][:15]}"
-            
-        draw.text((box[0], box[1] - 15 if box[1] - 15 > 0 else box[1] + 2), display_text, fill=color, font=font)
+        
+        # Position and draw text with background
+        text_position = (box[0] + 2, box[1] - 20 if box[1] - 20 > 0 else box[1] + 2)
+        
+        # Measure text for background
+        try:
+            text_width, text_height = draw.textsize(display_text, font=font)
+        except AttributeError:
+            # Fallback if textsize not available
+            text_height = 20
+            text_width = len(display_text) * 8
+        
+        # Draw background behind text
+        text_bg = [
+            text_position[0], text_position[1],
+            text_position[0] + text_width, text_position[1] + text_height
+        ]
+        draw.rectangle(text_bg, fill=color)
+        
+        # Draw white text on colored background
+        draw.text(text_position, display_text, fill="white", font=font)
 
         # If misplaced, also draw its expected box
         if status == 'misplaced' and 'expected_box' in item:
             exp_b = item['expected_box']
             draw.rectangle(exp_b, outline="blue", width=3, dash=[5,5])
-            draw.text((exp_b[0], exp_b[1] - 15 if exp_b[1] - 15 > 0 else exp_b[1] + 2), f"Exp: {name[:15]}", fill="blue", font=font)
+            
+            # Draw expected position text with background
+            expected_text = f"Exp: {name[:15]}"
+            exp_text_pos = (exp_b[0] + 2, exp_b[1] - 20 if exp_b[1] - 20 > 0 else exp_b[1] + 2)
+            
+            # Measure text
+            try:
+                exp_text_width, exp_text_height = draw.textsize(expected_text, font=font)
+            except AttributeError:
+                exp_text_height = 20
+                exp_text_width = len(expected_text) * 8
+                
+            # Draw background
+            exp_text_bg = [
+                exp_text_pos[0], exp_text_pos[1],
+                exp_text_pos[0] + exp_text_width, exp_text_pos[1] + exp_text_height
+            ]
+            draw.rectangle(exp_text_bg, fill="blue")
+            
+            # Draw text
+            draw.text(exp_text_pos, expected_text, fill="white", font=font)
 
     # Draw missing products (their expected locations)
     for item in missing_products:
         box = item["expected_box"]
         name = item.get("name", f"ID:{item['product_id']}")
-        draw.rectangle(box, outline="red", width=5, dash=[5,5])
-        draw.text((box[0], box[1] - 15 if box[1] - 15 > 0 else box[1] + 2), f"MISSING: {name[:15]}", fill="red", font=font)
+        
+        # Draw dashed box
+        draw.rectangle(box, outline=product_colors["missing"], width=5, dash=[5,5])
+        
+        # Draw missing text with background
+        missing_text = f"MISSING: {name[:15]}"
+        missing_text_pos = (box[0] + 2, box[1] - 20 if box[1] - 20 > 0 else box[1] + 2)
+        
+        # Measure text
+        try:
+            missing_text_width, missing_text_height = draw.textsize(missing_text, font=font)
+        except AttributeError:
+            missing_text_height = 20
+            missing_text_width = len(missing_text) * 8
+            
+        # Draw background
+        missing_text_bg = [
+            missing_text_pos[0], missing_text_pos[1],
+            missing_text_pos[0] + missing_text_width, missing_text_pos[1] + missing_text_height
+        ]
+        draw.rectangle(missing_text_bg, fill=product_colors["missing"])
+        
+        # Draw text
+        draw.text(missing_text_pos, missing_text, fill="white", font=font)
 
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG")
